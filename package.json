@@ -1,0 +1,10 @@
+{
+  "name": "photo-sorter",
+  "private": true,
+  "version": "1.0.0",
+  "description": "A browser-based photo sorter with year/month grouping and EXIF details.",
+  "scripts": {
+    "dev": "node photo-sorter/server.js"
+  }
+}
+
