@@ -107,6 +107,7 @@ async function buildBaseMeta(file){
     size:formatFileSize(file.size),
     date:date?date.toISOString():null,
     dateRaw:date?date.toLocaleString():null,
+    extension:file.name.split('.').pop().toLowerCase() || 'unknown',
     make:null,
     model:null,
     lens:null,
@@ -134,13 +135,13 @@ const fileInput=document.getElementById('file-input');
 const folderInput=document.getElementById('folder-input');
 const uploadArea=document.getElementById('upload-area');
 const gallery=document.getElementById('gallery');
-const stats=document.getElementById('stats');
 const filterBar=document.getElementById('filter-bar');
+const filterType=document.getElementById('filter-type');
 const filterYear=document.getElementById('filter-year');
 const filterMonth=document.getElementById('filter-month');
 const filterClear=document.getElementById('filter-clear');
 const lightbox=document.getElementById('lightbox');
-const lbImg=document.getElementById('lb-img');
+const lbMedia=document.getElementById('lb-media');
 const lbName=document.getElementById('lb-name');
 const lbMeta=document.getElementById('lb-meta');
 const lbClose=document.getElementById('lb-close');
@@ -178,10 +179,12 @@ function groupPhotos(photos){
   return{byYear,unknown};
 }
 function populateFilters(photos){
-  const years=new Set(),months=new Set();let hasUnknown=false;
-  photos.forEach(p=>{const d=p.meta.date?new Date(p.meta.date):null,y=d?d.getFullYear():null;if(d&&isValidYear(y)){years.add(y);months.add(d.getMonth());}else hasUnknown=true;});
+  const years=new Set(),months=new Set(),types=new Set();let hasUnknown=false;
+  photos.forEach(p=>{const d=p.meta.date?new Date(p.meta.date):null,y=d?d.getFullYear():null;if(d&&isValidYear(y)){years.add(y);months.add(d.getMonth());}else hasUnknown=true; types.add(p.meta.extension);});
+  filterType.innerHTML='<option value="">All types</option>';
   filterYear.innerHTML='<option value="">All years</option>';
   filterMonth.innerHTML='<option value="">All months</option>';
+  [...types].sort().forEach(t=>filterType.innerHTML+='<option value="'+t+'">'+t.toUpperCase()+'</option>');
   [...years].sort((a,b)=>b-a).forEach(y=>filterYear.innerHTML+='<option value="'+y+'">'+y+'</option>');
   [...months].sort((a,b)=>a-b).forEach(m=>filterMonth.innerHTML+='<option value="'+m+'">'+MONTHS[m]+'</option>');
   if(hasUnknown)filterYear.innerHTML+='<option value="unknown">Unknown</option>';
@@ -193,11 +196,12 @@ function comparePhotosNewestFirst(a,b){
   return bTime-aTime||a.meta.name.localeCompare(b.meta.name);
 }
 function getFilteredPhotos(){
-  const yVal=filterYear.value,m=filterMonth.value!==''?parseInt(filterMonth.value,10):null;
-  if(yVal===''&&m===null)return [...allPhotos].sort(comparePhotosNewestFirst);
-  if(yVal==='unknown')return allPhotos.filter(p=>{const y=p.meta.date?new Date(p.meta.date).getFullYear():null;return!p.meta.date||!isValidYear(y);}).sort(comparePhotosNewestFirst);
+  const tVal=filterType.value,yVal=filterYear.value,m=filterMonth.value!==''?parseInt(filterMonth.value,10):null;
+  if(tVal===''&&yVal===''&&m===null)return [...allPhotos].sort(comparePhotosNewestFirst);
+  if(yVal==='unknown')return allPhotos.filter(p=>{const y=p.meta.date?new Date(p.meta.date).getFullYear():null;return (!p.meta.date||!isValidYear(y)) && (tVal==='' || p.meta.extension===tVal);}).sort(comparePhotosNewestFirst);
   const y=yVal?parseInt(yVal,10):null;
   return allPhotos.filter(p=>{
+    if(tVal && p.meta.extension!==tVal)return false;
     if(!p.meta.date)return false;
     const d=new Date(p.meta.date),py=d.getFullYear();
     if(!isValidYear(py))return false;
@@ -238,16 +242,27 @@ function buildGrid(photos){
 }
 function openLightbox(idx){
   currentLbIdx=idx;const p=flatIndex[idx];
-  lightbox.classList.remove('hidden');lbImg.src='';lbName.textContent=p.meta.name;
-  lbImg.alt=p.meta.name;
-  const url=URL.createObjectURL(p.file);lbImg.onload=()=>URL.revokeObjectURL(url);lbImg.src=url;
+  lightbox.classList.remove('hidden');lbMedia.innerHTML='';lbName.textContent=p.meta.name;
+  const url=URL.createObjectURL(p.file);
+  let media;
+  if(p.file.type.startsWith('video/')){
+    media=document.createElement('video');
+    media.controls=true;
+    media.preload='metadata';
+  }else{
+    media=document.createElement('img');
+    media.alt=p.meta.name;
+  }
+  media.src=url;
+  media.onload=()=>URL.revokeObjectURL(url);
+  lbMedia.appendChild(media);
   renderMeta(p.meta);updateNavButtons();
   ensurePhotoMeta(p);
 }
 function renderMeta(meta){
   const d=meta.date?new Date(meta.date):null;
   const rows=[
-    ['File name',meta.name],['File size',meta.size],
+    ['File name',meta.name],['File size',meta.size],['File type',meta.extension.toUpperCase()],
     ['Date & time',meta.dateRaw||(d?d.toLocaleString():null)],
     ['Dimensions',meta.width&&meta.height?meta.width+' x '+meta.height:null],
     ['Camera',[meta.make,meta.model].filter(Boolean).join(' ')||null],
@@ -284,7 +299,7 @@ function updateNavButtons(){
   lbPrev.style.opacity=currentLbIdx>0?'1':'0.2';
   lbNext.style.opacity=currentLbIdx<flatIndex.length-1?'1':'0.2';
 }
-function closeLightbox(){lightbox.classList.add('hidden');lbImg.src='';}
+function closeLightbox(){lightbox.classList.add('hidden');lbMedia.innerHTML='';}
 lbClose.addEventListener('click',closeLightbox);
 lbPrev.addEventListener('click',()=>{if(currentLbIdx>0)openLightbox(currentLbIdx-1);});
 lbNext.addEventListener('click',()=>{if(currentLbIdx<flatIndex.length-1)openLightbox(currentLbIdx+1);});
@@ -295,9 +310,10 @@ document.addEventListener('keydown',e=>{
   if(e.key==='ArrowRight')lbNext.click();
 });
 lightbox.addEventListener('click',e=>{if(e.target===lightbox)closeLightbox();});
+filterType.addEventListener('change',applyFilter);
 filterYear.addEventListener('change',applyFilter);
 filterMonth.addEventListener('change',applyFilter);
-filterClear.addEventListener('click',()=>{filterYear.value='';filterMonth.value='';applyFilter();});
+filterClear.addEventListener('click',()=>{filterType.value='';filterYear.value='';filterMonth.value='';applyFilter();});
 function applyFilter(){renderGallery(getFilteredPhotos());}
 async function processFiles(files){
   if(!files.length)return;
@@ -330,11 +346,11 @@ async function processFiles(files){
   st.textContent=total+' photos loaded';
   populateFilters(allPhotos);renderGallery(allPhotos);
 }
-fileInput.addEventListener('change',e=>{processFiles(Array.from(e.target.files).filter(f=>f.type.startsWith('image/')));});
-folderInput.addEventListener('change',e=>{processFiles(Array.from(e.target.files).filter(f=>f.type.startsWith('image/')));});
+fileInput.addEventListener('change',e=>{processFiles(Array.from(e.target.files).filter(f=>f.type.startsWith('image/') || f.type.startsWith('video/')));});
+folderInput.addEventListener('change',e=>{processFiles(Array.from(e.target.files).filter(f=>f.type.startsWith('image/') || f.type.startsWith('video/')));});
 uploadArea.addEventListener('dragover',e=>{e.preventDefault();uploadArea.classList.add('drag-over');});
 uploadArea.addEventListener('dragleave',()=>uploadArea.classList.remove('drag-over'));
 uploadArea.addEventListener('drop',e=>{
   e.preventDefault();uploadArea.classList.remove('drag-over');
-  processFiles(Array.from(e.dataTransfer.files).filter(f=>f.type.startsWith('image/')));
+  processFiles(Array.from(e.dataTransfer.files).filter(f=>f.type.startsWith('image/') || f.type.startsWith('video/')));
 });
